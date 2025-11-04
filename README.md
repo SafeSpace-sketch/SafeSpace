@@ -1,2 +1,550 @@
 # SafeSpace
 Tempat kamu curhat secara anonim. 
+// - Admin Panel JavaScript
+
+class SafeSpaceAdmin {
+    constructor() {
+        this.isAuthenticated = false;
+        this.posts = [];
+        this.categories = [
+            { id: 'relationships', name: 'Hubungan', count: 0 },
+            { id: 'mental-health', name: 'Kesehatan Mental', count: 0 },
+            { id: 'work', name: 'Kerja', count: 0 },
+            { id: 'family', name: 'Keluarga', count: 0 },
+            { id: 'general', name: 'Umum', count: 0 }
+        ];
+        this.flaggedPosts = [];
+        
+        this.init();
+    }
+    
+    init() {
+        this.setupEventListeners();
+        this.checkAuthentication();
+        this.loadPostsData();
+    }
+    
+    // Event Listeners
+    setupEventListeners() {
+        // Login form
+        const loginForm = document.getElementById('adminLoginForm');
+        if (loginForm) {
+            loginForm.addEventListener('submit', this.handleLogin.bind(this));
+        }
+        
+        // Navigation tabs
+        const tabBtns = document.querySelectorAll('.admin-tab-btn');
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                this.switchTab(e.target.dataset.tab);
+            });
+        });
+        
+        // Logout
+        const logoutBtn = document.getElementById('adminLogout');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', this.handleLogout.bind(this));
+        }
+        
+        // Filters
+        this.setupFilters();
+        
+        // Actions
+        this.setupActions();
+    }
+    
+    // Authentication
+    checkAuthentication() {
+        const authToken = sessionStorage.getItem('safespace-admin-auth');
+        if (authToken && authToken === this.getAdminToken()) {
+            this.isAuthenticated = true;
+            this.showDashboard();
+        }
+    }
+    
+    getAdminToken() {
+        // Simple hash of admin password (in real app, use proper hashing)
+        return btoa('SafeSpaceAdmin2025!' + 'admin@safespace.com');
+    }
+    
+    async handleLogin(e) {
+        e.preventDefault();
+        
+        const passwordInput = document.getElementById('adminPassword');
+        const password = passwordInput.value;
+        
+        // Simple admin password check (in real app, use proper authentication)
+        const correctPassword = 'SafeSpaceAdmin2025!';
+        
+        if (password === correctPassword) {
+            this.isAuthenticated = true;
+            sessionStorage.setItem('safespace-admin-auth', this.getAdminToken());
+            this.showDashboard();
+            this.showStatus('Login berhasil! Selamat datang di panel admin.', 'success');
+        } else {
+            this.showStatus('Password salah!', 'error');
+            passwordInput.value = '';
+            passwordInput.focus();
+        }
+    }
+    
+    handleLogout() {
+        this.isAuthenticated = false;
+        sessionStorage.removeItem('safespace-admin-auth');
+        this.hideDashboard();
+        this.showStatus('Anda telah keluar dari panel admin.', 'success');
+    }
+    
+    showDashboard() {
+        document.querySelector('.admin-login-container').style.display = 'none';
+        document.getElementById('adminDashboard').style.display = 'block';
+        this.updateDashboardStats();
+        this.loadPostsForAdmin();
+    }
+    
+    hideDashboard() {
+        document.querySelector('.admin-login-container').style.display = 'flex';
+        document.getElementById('adminDashboard').style.display = 'none';
+    }
+    
+    // Tab Management
+    switchTab(tabName) {
+        // Update active tab button
+        document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+        
+        // Update active tab content
+        document.querySelectorAll('.admin-tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        document.getElementById(tabName).classList.add('active');
+        
+        // Load tab-specific data
+        this.loadTabData(tabName);
+    }
+    
+    loadTabData(tabName) {
+        switch(tabName) {
+            case 'overview':
+                this.updateDashboardStats();
+                break;
+            case 'posts':
+                this.loadPostsForAdmin();
+                break;
+            case 'moderation':
+                this.loadModerationQueue();
+                break;
+            case 'categories':
+                this.loadCategories();
+                break;
+            case 'analytics':
+                this.loadAnalytics();
+                break;
+            case 'settings':
+                this.loadSettings();
+                break;
+        }
+    }
+    
+    // Dashboard Stats
+    updateDashboardStats() {
+        this.posts = this.getAllPosts();
+        
+        const totalPosts = this.posts.length;
+        const todayPosts = this.getTodaysPosts().length;
+        const activeUsers = this.calculateActiveUsers();
+        const pendingModeration = this.getPendingModerationPosts().length;
+        
+        document.getElementById('totalPosts').textContent = totalPosts;
+        document.getElementById('todayPosts').textContent = todayPosts;
+        document.getElementById('activeUsers').textContent = activeUsers;
+        document.getElementById('pendingModeration').textContent = pendingModeration;
+    }
+    
+    getAllPosts() {
+        const saved = localStorage.getItem('safespace-posts');
+        return saved ? JSON.parse(saved) : [];
+    }
+    
+    getTodaysPosts() {
+        const today = new Date().toDateString();
+        return this.posts.filter(post => 
+            new Date(post.timestamp).toDateString() === today
+        );
+    }
+    
+    calculateActiveUsers() {
+        const last7Days = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const recentPosts = this.posts.filter(post => 
+            new Date(post.timestamp) >= last7Days
+        );
+        return new Set(recentPosts.map(post => post.author)).size;
+    }
+    
+    getPendingModerationPosts() {
+        return this.posts.filter(post => post.moderationStatus === 'flagged');
+    }
+    
+    // Posts Management
+    setupFilters() {
+        const searchInput = document.getElementById('adminPostSearch');
+        const categoryFilter = document.getElementById('adminCategoryFilter');
+        const statusFilter = document.getElementById('adminStatusFilter');
+        
+        if (searchInput) {
+            searchInput.addEventListener('input', this.filterPosts.bind(this));
+        }
+        
+        if (categoryFilter) {
+            categoryFilter.addEventListener('change', this.filterPosts.bind(this));
+        }
+        
+        if (statusFilter) {
+            statusFilter.addEventListener('change', this.filterPosts.bind(this));
+        }
+        
+        // Populate category filter
+        this.categories.forEach(category => {
+            const option = document.createElement('option');
+            option.value = category.id;
+            option.textContent = category.name;
+            categoryFilter.appendChild(option);
+        });
+    }
+    
+    setupActions() {
+        // Bulk actions
+        const bulkApprove = document.getElementById('bulkApprove');
+        const bulkFlag = document.getElementById('bulkFlag');
+        const bulkHide = document.getElementById('bulkHide');
+        
+        if (bulkApprove) {
+            bulkApprove.addEventListener('click', () => this.bulkAction('approve'));
+        }
+        
+        if (bulkFlag) {
+            bulkFlag.addEventListener('click', () => this.bulkAction('flag'));
+        }
+        
+        if (bulkHide) {
+            bulkHide.addEventListener('click', () => this.bulkAction('hide'));
+        }
+        
+        // Add category
+        const addCategoryBtn = document.getElementById('addCategoryBtn');
+        if (addCategoryBtn) {
+            addCategoryBtn.addEventListener('click', this.showAddCategoryModal.bind(this));
+        }
+        
+        // Settings
+        const saveGuidelines = document.getElementById('saveGuidelines');
+        const saveSettings = document.getElementById('saveSettings');
+        
+        if (saveGuidelines) {
+            saveGuidelines.addEventListener('click', this.saveGuidelines.bind(this));
+        }
+        
+        if (saveSettings) {
+            saveSettings.addEventListener('click', this.saveSettings.bind(this));
+        }
+    }
+    
+    loadPostsForAdmin() {
+        const container = document.getElementById('adminPostsContainer');
+        if (!container) return;
+        
+        if (this.posts.length === 0) {
+            container.innerHTML = this.getEmptyState('Belum ada cerita yang di-post.');
+            return;
+        }
+        
+        container.innerHTML = this.posts.map(post => this.renderAdminPost(post)).join('');
+        
+        // Add event listeners to post actions
+        this.setupPostActions();
+    }
+    
+    renderAdminPost(post) {
+        const timeAgo = this.getTimeAgo(new Date(post.timestamp));
+        const categoryLabel = this.getCategoryLabel(post.category);
+        
+        let statusClass = 'published';
+        let statusText = 'Published';
+        if (post.moderationStatus === 'flagged') {
+            statusClass = 'flagged';
+            statusText = 'Flagged';
+        } else if (post.status === 'hidden') {
+            statusClass = 'hidden';
+            statusText = 'Hidden';
+        }
+        
+        return `
+            <div class="admin-post-card" data-post-id="${post.id}">
+                <div class="admin-post-header">
+                    <div class="admin-post-meta">
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                        <div class="admin-post-status">
+                            <strong>${post.author}</strong>
+                            <span>•</span>
+                            <span>${timeAgo}</span>
+                            <span>•</span>
+                            <span>${categoryLabel}</span>
+                        </div>
+                    </div>
+                    <div class="admin-post-actions">
+                        <button class="admin-action-small edit" data-action="edit" data-post-id="${post.id}" title="Edit">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                            </svg>
+                        </button>
+                        <button class="admin-action-small flag" data-action="flag" data-post-id="${post.id}" title="Flag">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                            </svg>
+                        </button>
+                        <button class="admin-action-small delete" data-action="delete" data-post-id="${post.id}" title="Delete">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c0-1 1-2 2-2v2M10 11v6M14 11v6"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="admin-post-content">
+                    <h4>${this.getPostTitle(post.content)}</h4>
+                    <p>${this.getPostExcerpt(post.content)}</p>
+                </div>
+                
+                <div class="admin-post-footer">
+                    <span>${post.comments} komentar</span>
+                    <span>${this.formatDate(post.timestamp)}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    setupPostActions() {
+        document.querySelectorAll('[data-action]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = e.currentTarget.dataset.action;
+                const postId = e.currentTarget.dataset.postId;
+                this.handlePostAction(action, postId);
+            });
+        });
+    }
+    
+    handlePostAction(action, postId) {
+        switch(action) {
+            case 'edit':
+                this.editPost(postId);
+                break;
+            case 'flag':
+                this.flagPost(postId);
+                break;
+            case 'delete':
+                this.deletePost(postId);
+                break;
+        }
+    }
+    
+    editPost(postId) {
+        const post = this.posts.find(p => p.id === postId);
+        if (!post) return;
+        
+        const newContent = prompt('Edit cerita:', post.content);
+        if (newContent !== null && newContent.trim()) {
+            post.content = newContent.trim();
+            this.savePosts();
+            this.loadPostsForAdmin();
+            this.showStatus('Cerita berhasil diupdate!', 'success');
+        }
+    }
+    
+    flagPost(postId) {
+        const post = this.posts.find(p => p.id === postId);
+        if (!post) return;
+        
+        const reason = prompt('Alasan penandaan (flag):');
+        if (reason) {
+            post.moderationStatus = 'flagged';
+            post.flagReason = reason;
+            this.savePosts();
+            this.loadPostsForAdmin();
+            this.showStatus('Cerita berhasil ditandai untuk moderasi!', 'success');
+        }
+    }
+    
+    deletePost(postId) {
+        if (confirm('Apakah Anda yakin ingin menghapus cerita ini?')) {
+            const postIndex = this.posts.findIndex(p => p.id === postId);
+            if (postIndex !== -1) {
+                this.posts.splice(postIndex, 1);
+                this.savePosts();
+                this.loadPostsForAdmin();
+                this.showStatus('Cerita berhasil dihapus!', 'success');
+            }
+        }
+    }
+    
+    filterPosts() {
+        const searchTerm = document.getElementById('adminPostSearch').value.toLowerCase();
+        const categoryFilter = document.getElementById('adminCategoryFilter').value;
+        const statusFilter = document.getElementById('adminStatusFilter').value;
+        
+        let filtered = this.posts;
+        
+        if (searchTerm) {
+            filtered = filtered.filter(post => 
+                post.content.toLowerCase().includes(searchTerm) ||
+                post.author.toLowerCase().includes(searchTerm)
+            );
+        }
+        
+        if (categoryFilter !== 'all') {
+            filtered = filtered.filter(post => post.category === categoryFilter);
+        }
+        
+        if (statusFilter !== 'all') {
+            if (statusFilter === 'flagged') {
+                filtered = filtered.filter(post => post.moderationStatus === 'flagged');
+            } else {
+                filtered = filtered.filter(post => post.status === statusFilter);
+            }
+        }
+        
+        const container = document.getElementById('adminPostsContainer');
+        if (filtered.length === 0) {
+            container.innerHTML = this.getEmptyState('Tidak ada cerita yang sesuai dengan filter.');
+        } else {
+            container.innerHTML = filtered.map(post => this.renderAdminPost(post)).join('');
+            this.setupPostActions();
+        }
+    }
+    
+    // Moderation
+    loadModerationQueue() {
+        const container = document.getElementById('moderationContainer');
+        if (!container) return;
+        
+        const flaggedPosts = this.getPendingModerationPosts();
+        
+        if (flaggedPosts.length === 0) {
+            container.innerHTML = this.getEmptyState('Tidak ada cerita yang perlu moderasi.');
+            return;
+        }
+        
+        container.innerHTML = flaggedPosts.map(post => this.renderFlaggedPost(post)).join('');
+        this.setupModerationActions();
+    }
+    
+    renderFlaggedPost(post) {
+        return `
+            <div class="flagged-post" data-post-id="${post.id}">
+                <h4>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    Cerita Tertandai
+                    <span class="flag-reason">${post.flagReason || 'Tidak ada alasan'}</span>
+                </h4>
+                <p><strong>${post.author}</strong> - ${this.getTimeAgo(new Date(post.timestamp))}</p>
+                <p>${this.getPostExcerpt(post.content)}</p>
+                <div class="flagged-actions">
+                    <button class="admin-btn primary" data-action="approve" data-post-id="${post.id}">Setujui</button>
+                    <button class="admin-btn danger" data-action="reject" data-post-id="${post.id}">Tolak</button>
+                </div>
+            </div>
+        `;
+    }
+    
+    setupModerationActions() {
+        document.querySelectorAll('[data-action="approve"], [data-action="reject"]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const action = e.currentTarget.dataset.action;
+                const postId = e.currentTarget.dataset.postId;
+                this.handleModerationAction(action, postId);
+            });
+        });
+    }
+    
+    handleModerationAction(action, postId) {
+        const post = this.posts.find(p => p.id === postId);
+        if (!post) return;
+        
+        if (action === 'approve') {
+            post.moderationStatus = 'approved';
+            post.status = 'published';
+            delete post.flagReason;
+            this.showStatus('Cerita disetujui!', 'success');
+        } else {
+            post.status = 'hidden';
+            this.showStatus('Cerita disembunyikan!', 'warning');
+        }
+        
+        this.savePosts();
+        this.loadModerationQueue();
+    }
+    
+    bulkAction(action) {
+        const posts = this.getPendingModerationPosts();
+        
+        if (posts.length === 0) {
+            this.showStatus('Tidak ada cerita untuk diproses!', 'warning');
+            return;
+        }
+        
+        if (!confirm(`Apakah Anda yakin ingin ${action} semua cerita yang ditandai?`)) {
+            return;
+        }
+        
+        posts.forEach(post => {
+            switch(action) {
+                case 'approve':
+                    post.moderationStatus = 'approved';
+                    post.status = 'published';
+                    break;
+                case 'flag':
+                    post.moderationStatus = 'flagged';
+                    break;
+                case 'hide':
+                    post.status = 'hidden';
+                    break;
+            }
+        });
+        
+        this.savePosts();
+        this.loadModerationQueue();
+        this.updateDashboardStats();
+        this.showStatus(`Berhasil ${action} ${posts.length} cerita!`, 'success');
+    }
+    
+    // Categories Management
+    loadCategories() {
+        const container = document.getElementById('categoriesList');
+        if (!container) return;
+        
+        const categories = this.getCategoryStats();
+        
+        if (categories.length === 0) {
+            container.innerHTML = this.getEmptyState('Belum ada kategori yang dibuat.');
+            return;
+        }
+        
+        container.innerHTML = categories.map(category => this.renderCategoryCard(category)).join('');
+    }
+    
+    renderCategoryCard(category) {
+        return `
+            <div class="category-card" data-category-id="${category.id}">
+                <div class="category-info">
+                    <h4>${category.name}</h4>
+                    <p>${category.posts} cerita • Dibuat: ${this.formatDate(category.createdAt)}</p>
+                </div>
+                <div class="category-stats">
+                    <span>${category.posts} post</span>
+                    <span>${category.views} views</span>
+                </div>
+                <div class="ca
